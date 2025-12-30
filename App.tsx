@@ -8,6 +8,12 @@ const App: React.FC = () => {
   const [boards, setBoards] = useState<Board[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   
+  // Cloud Sync State
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [isSyncEnabled, setIsSyncEnabled] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [lastSyncStatus, setLastSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
   // UI state
   const [currentSide, setCurrentSide] = useState<Side>('A');
   const [isAddingComponent, setIsAddingComponent] = useState(false);
@@ -56,7 +62,22 @@ const App: React.FC = () => {
         }
       } catch (e) { console.error("Error al cargar datos", e); }
     }
+    
+    // Load Cloud Settings
+    const savedCloud = localStorage.getItem('pcb_cloud_settings');
+    if (savedCloud) {
+        try {
+            const parsedCloud = JSON.parse(savedCloud);
+            setWebhookUrl(parsedCloud.url || '');
+            setIsSyncEnabled(parsedCloud.enabled || false);
+        } catch(e) {}
+    }
   }, []);
+
+  // Save Cloud Settings
+  useEffect(() => {
+      localStorage.setItem('pcb_cloud_settings', JSON.stringify({ url: webhookUrl, enabled: isSyncEnabled }));
+  }, [webhookUrl, isSyncEnabled]);
 
   // Fix: Wrap localStorage in try/catch to prevent crashes with large base64 images
   useEffect(() => {
@@ -73,6 +94,29 @@ const App: React.FC = () => {
   const updateBoard = useCallback((updatedBoard: Board) => {
     setBoards(prev => prev.map(b => b.id === updatedBoard.id ? { ...updatedBoard } : b));
   }, []);
+
+  // --- CLOUD SYNC FUNCTION ---
+  const sendToCloud = (defectData: any) => {
+    if (!isSyncEnabled || !webhookUrl) return;
+
+    setLastSyncStatus('idle');
+    
+    // We use no-cors to support Google Apps Script Webhooks simply
+    fetch(webhookUrl, {
+        method: 'POST',
+        mode: 'no-cors', 
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(defectData)
+    }).then(() => {
+        setLastSyncStatus('success');
+        setTimeout(() => setLastSyncStatus('idle'), 2000);
+    }).catch(err => {
+        console.error("Cloud Sync Error", err);
+        setLastSyncStatus('error');
+    });
+  };
 
   const toggleSide = () => {
     const nextSide = currentSide === 'A' ? 'B' : 'A';
@@ -292,6 +336,20 @@ const App: React.FC = () => {
     e.stopPropagation();
     if (!currentBoard) return;
     const now = Date.now();
+    
+    // Find component name for logging
+    const comp = currentBoard.components.find(c => c.id === compId);
+    if(comp) {
+        sendToCloud({
+            timestamp: new Date().toISOString(),
+            boardName: currentBoard.name,
+            side: currentSide,
+            component: comp.name,
+            defect: key.toUpperCase(),
+            action: 'ADD'
+        });
+    }
+
     updateBoard({
       ...currentBoard,
       components: currentBoard.components.map(c => 
@@ -315,6 +373,15 @@ const App: React.FC = () => {
         const marker = currentBoard.genericMarkers.find(m => m.id === compId);
         if (!marker || marker.count <= 0) return;
         
+        sendToCloud({
+            timestamp: new Date().toISOString(),
+            boardName: currentBoard.name,
+            side: currentSide,
+            component: marker.type,
+            defect: marker.type.toUpperCase(),
+            action: 'REMOVE'
+        });
+
         const newHistory = [...marker.history];
         newHistory.pop(); // Remove last entry
 
@@ -328,6 +395,15 @@ const App: React.FC = () => {
         // Handle component defect decrement
         const comp = currentBoard.components.find(c => c.id === compId);
         if (!comp || comp.counts[key] <= 0) return;
+
+        sendToCloud({
+            timestamp: new Date().toISOString(),
+            boardName: currentBoard.name,
+            side: currentSide,
+            component: comp.name,
+            defect: key.toUpperCase(),
+            action: 'REMOVE'
+        });
 
         // Remove last occurance of this defect type from history
         const newHistory = [...comp.history];
@@ -379,6 +455,16 @@ const App: React.FC = () => {
       id: Math.random().toString(36).substr(2, 9),
       type, x, y, side: currentSide, count: 1, history: [now], scale: 1
     };
+    
+    sendToCloud({
+        timestamp: new Date().toISOString(),
+        boardName: currentBoard.name,
+        side: currentSide,
+        component: type,
+        defect: type.toUpperCase(),
+        action: 'ADD'
+    });
+
     updateBoard({ ...currentBoard, genericMarkers: [...currentBoard.genericMarkers, newMarker] });
     setContextMenu(null);
   };
@@ -387,6 +473,19 @@ const App: React.FC = () => {
     e.stopPropagation();
     if (!currentBoard || showHeatmap || isEditMode) return;
     const now = Date.now();
+    
+    const marker = currentBoard.genericMarkers.find(m => m.id === id);
+    if(marker) {
+        sendToCloud({
+            timestamp: new Date().toISOString(),
+            boardName: currentBoard.name,
+            side: currentSide,
+            component: marker.type,
+            defect: marker.type.toUpperCase(),
+            action: 'ADD'
+        });
+    }
+
     updateBoard({
       ...currentBoard,
       genericMarkers: currentBoard.genericMarkers.map(m => m.id === id ? { ...m, count: m.count + 1, history: [...m.history, now] } : m)
@@ -605,6 +704,11 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {/* Cloud Button */}
+          <button onClick={() => setShowSyncModal(true)} title="Configurar Nube / Excel Online" className={`px-3 py-1.5 rounded-md text-[10px] font-black border transition-all flex items-center gap-2 whitespace-nowrap ${isSyncEnabled ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
+             <i className={`fa-solid fa-cloud ${lastSyncStatus === 'success' ? 'text-white animate-bounce' : lastSyncStatus === 'error' ? 'text-red-500' : isSyncEnabled ? 'text-white' : 'text-slate-500'}`}></i> {isSyncEnabled ? 'SYNC ON' : 'NUBE'}
+          </button>
+
           <button onClick={clearVisualCounters} title="Limpiar conteos visuales (Mantiene historial)" className="px-3 py-1.5 rounded-md text-[10px] font-black bg-slate-800 border border-slate-700 hover:border-yellow-500 transition-all flex items-center gap-2 whitespace-nowrap">
             <i className="fa-solid fa-broom text-yellow-500"></i> LIMPIAR VISTA
           </button>
@@ -788,6 +892,42 @@ const App: React.FC = () => {
           </div>
         </main>
       </div>
+      
+      {/* Sync Configuration Modal */}
+      {showSyncModal && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6" onClick={() => setShowSyncModal(false)}>
+          <div className="bg-slate-900 border border-emerald-500/30 p-8 rounded-[2rem] shadow-2xl w-full max-w-xl animate-in" onClick={e => e.stopPropagation()}>
+            <h2 className="text-2xl font-black text-emerald-500 mb-4 flex items-center gap-3"><i className="fa-solid fa-cloud"></i> Configuración de Nube</h2>
+            <p className="text-xs text-slate-400 mb-6">
+                Ingresa la dirección Webhook de tu Hoja de Cálculo (Google Script) para guardar fallas en tiempo real.
+            </p>
+            <div className="space-y-4">
+                <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">URL del Webhook</label>
+                    <input 
+                        type="text" 
+                        value={webhookUrl} 
+                        onChange={e => setWebhookUrl(e.target.value)} 
+                        placeholder="https://script.google.com/macros/s/..." 
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-xs font-mono text-emerald-400 outline-none focus:border-emerald-500" 
+                    />
+                </div>
+                
+                <div className="flex items-center gap-3 bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <div className={`w-10 h-6 rounded-full p-1 cursor-pointer transition-colors ${isSyncEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`} onClick={() => setIsSyncEnabled(!isSyncEnabled)}>
+                        <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform ${isSyncEnabled ? 'translate-x-4' : 'translate-x-0'}`}></div>
+                    </div>
+                    <span className="text-xs font-bold text-white uppercase">{isSyncEnabled ? 'Sincronización Activada' : 'Sincronización Pausada'}</span>
+                </div>
+
+                <div className="flex gap-4 mt-4">
+                    <button onClick={() => setShowSyncModal(false)} className="flex-1 p-3 bg-slate-800 rounded-xl font-bold uppercase hover:bg-slate-700 text-xs">Cerrar</button>
+                    <button onClick={() => { setIsSyncEnabled(true); setShowSyncModal(false); }} className="flex-1 p-3 bg-emerald-600 rounded-xl font-black uppercase shadow-lg hover:bg-emerald-500 text-xs">Guardar y Activar</button>
+                </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNewBoardModal && (
         <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6" onClick={() => setShowNewBoardModal(false)}>
