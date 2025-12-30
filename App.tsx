@@ -701,7 +701,8 @@ const App: React.FC = () => {
               <div className="flex flex-col items-center gap-6 opacity-30 animate-pulse"><i className="fa-solid fa-microchip text-[120px]"></i><h2 className="text-2xl font-black uppercase tracking-widest">Seleccione Proyecto</h2></div>
             ) : !currentImg ? (
               <div className="bg-slate-900/50 border-4 border-dashed border-slate-800 p-16 rounded-[4rem] flex flex-col items-center gap-6 text-center">
-                  <h3 className="text-xl font-black text-slate-500 uppercase">Falta Imagen Lado {currentSide}</h3>
+                  <h3 className="text-xl font-black text-slate-500 uppercase">Falta Imagen del Lado {currentSide}</h3>
+                  <p className="text-sm text-slate-500">Carga una foto para inspeccionar este lado.</p>
                   <button onClick={() => lateImportRef.current?.click()} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold uppercase shadow-lg transition-all flex items-center gap-2">
                       <i className="fa-solid fa-upload"></i> Subir Imagen Lado {currentSide}
                   </button>
