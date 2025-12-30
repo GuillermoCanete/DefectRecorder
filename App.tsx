@@ -37,6 +37,7 @@ const App: React.FC = () => {
   const imageRef = useRef<HTMLImageElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
+  const lateImportRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const currentBoard = useMemo(() => {
@@ -101,6 +102,22 @@ const App: React.FC = () => {
       reader.onload = (event) => {
         const data = event.target?.result as string;
         setNewBoardData(prev => ({ ...prev, [side === 'A' ? 'imageA' : 'imageB']: data }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleLateImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && currentBoard) {
+      if (file.size > 5000000) {
+          alert("Advertencia: La imagen es muy grande. Podría afectar el rendimiento.");
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const data = event.target?.result as string;
+        const key = currentSide === 'A' ? 'imageA' : 'imageB';
+        updateBoard({ ...currentBoard, [key]: data });
       };
       reader.readAsDataURL(file);
     }
@@ -550,8 +567,7 @@ const App: React.FC = () => {
                 <i className="fa-solid fa-microchip text-white"></i>
             </div>
             <span className="font-black text-xl tracking-tighter uppercase whitespace-nowrap">PCB<span className="text-blue-500">PRO</span></span>
-            {/* Version indicator V1.6 */}
-            <span className="ml-1 text-[10px] text-slate-500 font-bold bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">V1.6</span>
+            <span className="ml-1 text-[10px] text-slate-500 font-bold bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">V1.7</span>
           </div>
           <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded-md border border-slate-700">
             <select 
@@ -684,7 +700,13 @@ const App: React.FC = () => {
             {!currentBoard ? (
               <div className="flex flex-col items-center gap-6 opacity-30 animate-pulse"><i className="fa-solid fa-microchip text-[120px]"></i><h2 className="text-2xl font-black uppercase tracking-widest">Seleccione Proyecto</h2></div>
             ) : !currentImg ? (
-              <div className="bg-slate-900/50 border-4 border-dashed border-slate-800 p-16 rounded-[4rem] flex flex-col items-center gap-6 text-center"><h3 className="text-xl font-black text-slate-500 uppercase">Falta Imagen Lado {currentSide}</h3></div>
+              <div className="bg-slate-900/50 border-4 border-dashed border-slate-800 p-16 rounded-[4rem] flex flex-col items-center gap-6 text-center">
+                  <h3 className="text-xl font-black text-slate-500 uppercase">Falta Imagen Lado {currentSide}</h3>
+                  <button onClick={() => lateImportRef.current?.click()} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold uppercase shadow-lg transition-all flex items-center gap-2">
+                      <i className="fa-solid fa-upload"></i> Subir Imagen Lado {currentSide}
+                  </button>
+                  <input type="file" hidden ref={lateImportRef} accept="image/*" onChange={handleLateImageUpload} />
+              </div>
             ) : (
                // Wrapper for Pan/Zoom Transformation
               <div 
