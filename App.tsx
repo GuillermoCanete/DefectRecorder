@@ -12,7 +12,7 @@ const App: React.FC = () => {
   const [webhookUrl, setWebhookUrl] = useState('');
   const [isSyncEnabled, setIsSyncEnabled] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [lastSyncStatus, setLastSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [lastSyncStatus, setLastSyncStatus] = useState<'idle' | 'success' | 'error' | 'uploading'>('idle');
 
   // UI state
   const [currentSide, setCurrentSide] = useState<Side>('A');
@@ -96,30 +96,27 @@ const App: React.FC = () => {
     setBoards(prev => prev.map(b => b.id === updatedBoard.id ? { ...updatedBoard } : b));
   }, []);
 
-  // --- CLOUD SYNC FUNCTION (Updated for Split Date/Time) ---
+  // --- CLOUD SYNC FUNCTION ---
   const sendToCloud = (data: { boardName: string, side: string, component: string, defect: string, action: string }) => {
     if (!isSyncEnabled || !webhookUrl) return;
 
     setLastSyncStatus('idle');
     
     const now = new Date();
-    // Generate separate date and time strings
     const dateStr = now.toLocaleDateString('es-ES');
     const timeStr = now.toLocaleTimeString('es-ES');
 
     const payload = {
+        type: 'DATA', // Identificador para el script
         date: dateStr,
         time: timeStr,
         ...data
     };
     
-    // We use no-cors to support Google Apps Script Webhooks simply
     fetch(webhookUrl, {
         method: 'POST',
         mode: 'no-cors', 
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     }).then(() => {
         setLastSyncStatus('success');
@@ -130,11 +127,65 @@ const App: React.FC = () => {
     });
   };
 
-  // --- SCREENSHOT FUNCTIONALITY ---
+  // --- UPLOAD SCREENSHOT TO CLOUD ---
+  const handleCloudScreenshot = async () => {
+    if (!captureRef.current || !currentBoard) return;
+    if (!webhookUrl) {
+        alert("Primero configura la URL de la Nube.");
+        setShowSyncModal(true);
+        return;
+    }
+
+    const html2canvas = (window as any).html2canvas;
+    if (!html2canvas) return alert("Error librería no cargada");
+
+    try {
+        setLastSyncStatus('uploading');
+        
+        // 1. Capture Canvas
+        const canvas = await html2canvas(captureRef.current, {
+            useCORS: true,
+            backgroundColor: null,
+            scale: 1.5, // Slightly lower scale than download to reduce payload size
+            logging: false
+        });
+
+        // 2. Convert to Base64 (remove prefix data:image/png;base64,)
+        const base64Image = canvas.toDataURL("image/png").split(',')[1];
+        
+        const now = new Date();
+        const payload = {
+            type: 'IMAGE',
+            date: now.toLocaleDateString('es-ES'),
+            time: now.toLocaleTimeString('es-ES'),
+            boardName: currentBoard.name,
+            side: currentSide,
+            image: base64Image
+        };
+
+        // 3. Send to Webhook
+        await fetch(webhookUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        setLastSyncStatus('success');
+        alert("Captura enviada a la hoja 'Capturas' en Google Sheets.");
+        setTimeout(() => setLastSyncStatus('idle'), 3000);
+
+    } catch (error) {
+        console.error("Upload failed:", error);
+        setLastSyncStatus('error');
+        alert("Error al subir imagen. Es posible que sea demasiado grande.");
+    }
+  };
+
+  // --- LOCAL DOWNLOAD SCREENSHOT ---
   const handleCaptureScreenshot = async () => {
     if (!captureRef.current || !currentBoard) return;
     
-    // Check if html2canvas is loaded globally via script tag
     const html2canvas = (window as any).html2canvas;
     if (!html2canvas) {
         alert("Error: Librería de captura no cargada. Recargue la página.");
@@ -142,20 +193,14 @@ const App: React.FC = () => {
     }
 
     try {
-        const wasHeatmapOn = showHeatmap;
-        // Optionally force heatmap on for capture if desired, or just capture what is seen.
-        // We will capture exactly what the user sees.
-
         const canvas = await html2canvas(captureRef.current, {
-            useCORS: true, // Important for images
-            backgroundColor: null, // Transparent background if possible
-            scale: 2, // Higher quality
+            useCORS: true, 
+            backgroundColor: null, 
+            scale: 2, 
             logging: false
         });
 
         const image = canvas.toDataURL("image/png");
-        
-        // Trigger Download
         const link = document.createElement("a");
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         link.href = image;
@@ -164,7 +209,7 @@ const App: React.FC = () => {
 
     } catch (error) {
         console.error("Screenshot failed:", error);
-        alert("Error al crear la captura. Intente nuevamente.");
+        alert("Error al crear la captura.");
     }
   };
 
@@ -175,7 +220,7 @@ const App: React.FC = () => {
     setContextMenu(null);
     setSelectedMarkerId(null);
     setExpandedStatId(null);
-    setTransform({ scale: 1, x: 0, y: 0 }); // Reset zoom on side switch
+    setTransform({ scale: 1, x: 0, y: 0 });
   };
 
   const handleBoardSwitch = (id: string) => {
@@ -186,7 +231,7 @@ const App: React.FC = () => {
     setActiveBoardId(id);
     setCurrentSide('A');
     setExpandedStatId(null);
-    setTransform({ scale: 1, x: 0, y: 0 }); // Reset zoom on board switch
+    setTransform({ scale: 1, x: 0, y: 0 });
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, side: 'A' | 'B') => {
@@ -217,10 +262,8 @@ const App: React.FC = () => {
     }
   };
 
-  // Step 1: Check for duplicate name
   const handleSaveAttempt = () => {
     if (!newBoardData.name.trim()) return alert("Nombre obligatorio");
-
     const duplicate = boards.find(b => b.name.toLowerCase() === newBoardData.name.trim().toLowerCase());
     if (duplicate) {
         setShowOverwriteModal(true);
@@ -229,13 +272,10 @@ const App: React.FC = () => {
     }
   };
 
-  // Step 2: Finalize save (with or without overwrite)
   const finalizeSaveBoard = (overwrite: boolean) => {
-     // Safety check for huge images impacting performance
      if ((newBoardData.imageA && newBoardData.imageA.length > 4000000) || (newBoardData.imageB && newBoardData.imageB.length > 4000000)) {
         alert("Advertencia: Las imágenes son muy grandes. Es posible que no se guarden si recarga la página debido a límites del navegador.");
     }
-
     const newBoard: Board = {
       id: Math.random().toString(36).substr(2, 9),
       name: newBoardData.name,
@@ -245,7 +285,6 @@ const App: React.FC = () => {
       genericMarkers: [],
       createdAt: Date.now()
     };
-    
     setBoards(prev => {
         let newList = [...prev];
         if (overwrite) {
@@ -253,7 +292,6 @@ const App: React.FC = () => {
         }
         return [...newList, newBoard];
     });
-
     setActiveBoardId(newBoard.id); 
     setCurrentSide('A');
     setShowNewBoardModal(false);
@@ -264,10 +302,8 @@ const App: React.FC = () => {
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!imageRef.current || !currentBoard || isEditMode) return;
-    
     setActiveCompDetail(null);
     setSelectedMarkerId(null);
-
     const rect = imageRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -275,9 +311,7 @@ const App: React.FC = () => {
   };
 
   const handleImageClick = (e: React.MouseEvent) => {
-    // Only handle click if we weren't dragging (moved significantly)
     if (hasMoved.current) return;
-
     if (!imageRef.current || !currentBoard) return;
     const rect = imageRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -301,68 +335,39 @@ const App: React.FC = () => {
     }
   };
 
-  // --- Zoom & Pan Logic ---
-
   const handleWheel = (e: React.WheelEvent) => {
     if (!currentBoard) return;
-    // e.preventDefault(); // React synthetic events can't always prevent default passive listeners
     const scaleAmount = -e.deltaY * 0.002;
     const newScale = Math.min(Math.max(0.5, transform.scale + scaleAmount), 5);
-    
-    setTransform(prev => ({
-        ...prev,
-        scale: newScale
-    }));
+    setTransform(prev => ({ ...prev, scale: newScale }));
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!currentBoard || e.button !== 0) return; // Only left click
-    if (isAddingComponent || isEditMode) return; // Don't pan while editing
+    if (!currentBoard || e.button !== 0) return; 
+    if (isAddingComponent || isEditMode) return; 
     setIsDragging(true);
     hasMoved.current = false;
     dragStart.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    // 1. Prevent default to stop browser native drag
     e.preventDefault();
-
-    // 2. Safety check: If not dragging, exit
     if (!isDragging) return;
-
-    // 3. CRITICAL FIX: If dragStart.current is null (race condition), stop dragging immediately
-    if (!dragStart.current) {
-        setIsDragging(false);
-        return;
-    }
-
+    if (!dragStart.current) { setIsDragging(false); return; }
     hasMoved.current = true;
-    
-    // 4. Capture values synchronously
     const startX = dragStart.current.x;
     const startY = dragStart.current.y;
     const clientX = e.clientX;
     const clientY = e.clientY;
-
-    setTransform(prev => ({
-        ...prev,
-        x: clientX - startX,
-        y: clientY - startY
-    }));
+    setTransform(prev => ({ ...prev, x: clientX - startX, y: clientY - startY }));
   };
 
   const handleMouseUp = () => {
-    if (isDragging) {
-        setIsDragging(false);
-        dragStart.current = null;
-    }
-    // Note: We don't reset hasMoved here immediately to allow Click event to check it
+    if (isDragging) { setIsDragging(false); dragStart.current = null; }
     setTimeout(() => { hasMoved.current = false; }, 0);
   };
 
   const resetZoom = () => setTransform({ scale: 1, x: 0, y: 0 });
-
-  // ------------------------
 
   const createComponent = () => {
     if (!showCompDialog || !newCompName.trim() || !currentBoard) return;
@@ -386,8 +391,6 @@ const App: React.FC = () => {
     e.stopPropagation();
     if (!currentBoard) return;
     const now = Date.now();
-    
-    // Find component name for logging
     const comp = currentBoard.components.find(c => c.id === compId);
     if(comp) {
         sendToCloud({
@@ -398,7 +401,6 @@ const App: React.FC = () => {
             action: 'ADD'
         });
     }
-
     updateBoard({
       ...currentBoard,
       components: currentBoard.components.map(c => 
@@ -412,16 +414,12 @@ const App: React.FC = () => {
     setActiveCompDetail(null);
   };
 
-  // Function to decrement defects from Sidebar
   const decrementDefect = (compId: string, key: keyof DefectCounts | 'generic', e: React.MouseEvent) => {
     e.stopPropagation();
     if (!currentBoard) return;
-
     if (key === 'generic') {
-        // Handle generic marker decrement
         const marker = currentBoard.genericMarkers.find(m => m.id === compId);
         if (!marker || marker.count <= 0) return;
-        
         sendToCloud({
             boardName: currentBoard.name,
             side: currentSide,
@@ -429,10 +427,8 @@ const App: React.FC = () => {
             defect: marker.type.toUpperCase(),
             action: 'REMOVE'
         });
-
         const newHistory = [...marker.history];
-        newHistory.pop(); // Remove last entry
-
+        newHistory.pop(); 
         updateBoard({
             ...currentBoard,
             genericMarkers: currentBoard.genericMarkers.map(m => 
@@ -440,10 +436,8 @@ const App: React.FC = () => {
             )
         });
     } else {
-        // Handle component defect decrement
         const comp = currentBoard.components.find(c => c.id === compId);
         if (!comp || comp.counts[key] <= 0) return;
-
         sendToCloud({
             boardName: currentBoard.name,
             side: currentSide,
@@ -451,14 +445,9 @@ const App: React.FC = () => {
             defect: key.toUpperCase(),
             action: 'REMOVE'
         });
-
-        // Remove last occurance of this defect type from history
         const newHistory = [...comp.history];
         const lastIndex = newHistory.map(h => h.type).lastIndexOf(key);
-        if (lastIndex !== -1) {
-            newHistory.splice(lastIndex, 1);
-        }
-
+        if (lastIndex !== -1) { newHistory.splice(lastIndex, 1); }
         updateBoard({
             ...currentBoard,
             components: currentBoard.components.map(c => 
@@ -502,7 +491,6 @@ const App: React.FC = () => {
       id: Math.random().toString(36).substr(2, 9),
       type, x, y, side: currentSide, count: 1, history: [now], scale: 1
     };
-    
     sendToCloud({
         boardName: currentBoard.name,
         side: currentSide,
@@ -510,7 +498,6 @@ const App: React.FC = () => {
         defect: type.toUpperCase(),
         action: 'ADD'
     });
-
     updateBoard({ ...currentBoard, genericMarkers: [...currentBoard.genericMarkers, newMarker] });
     setContextMenu(null);
   };
@@ -519,7 +506,6 @@ const App: React.FC = () => {
     e.stopPropagation();
     if (!currentBoard || showHeatmap || isEditMode) return;
     const now = Date.now();
-    
     const marker = currentBoard.genericMarkers.find(m => m.id === id);
     if(marker) {
         sendToCloud({
@@ -530,7 +516,6 @@ const App: React.FC = () => {
             action: 'ADD'
         });
     }
-
     updateBoard({
       ...currentBoard,
       genericMarkers: currentBoard.genericMarkers.map(m => m.id === id ? { ...m, count: m.count + 1, history: [...m.history, now] } : m)
@@ -569,7 +554,6 @@ const App: React.FC = () => {
     setActiveCompDetail(null);
   };
 
-  // Modified stats to include detail breakdown
   const stats = useMemo(() => {
     if (!currentBoard) return [];
     const list = currentBoard.components
@@ -578,7 +562,7 @@ const App: React.FC = () => {
           id: c.id,
           name: c.name, 
           total: Object.values(c.counts).reduce((a, b) => a + b, 0), 
-          counts: c.counts, // We need individual counts for the breakdown
+          counts: c.counts, 
           type: 'component' 
       }));
     const generics = currentBoard.genericMarkers
@@ -747,10 +731,15 @@ const App: React.FC = () => {
                 <i className={`fa-solid fa-fire ${showHeatmap ? 'text-white' : 'text-orange-500'}`}></i> CALOR
             </button>
             
-            {/* New Screenshot Button */}
-            <button onClick={handleCaptureScreenshot} title="Capturar Heatmap" className="px-3 py-1.5 rounded-md text-[10px] font-black border border-slate-700 bg-slate-800 text-cyan-400 hover:text-white hover:border-cyan-400 transition-all flex items-center gap-2">
-                <i className="fa-solid fa-camera"></i> CAPTURA
-            </button>
+            {/* Screenshot Buttons */}
+            <div className="flex gap-0.5">
+                <button onClick={handleCaptureScreenshot} title="Descargar Captura" className="px-3 py-1.5 rounded-l-md text-[10px] font-black border-y border-l border-slate-700 bg-slate-800 text-cyan-400 hover:text-white hover:border-cyan-400 transition-all flex items-center gap-2">
+                    <i className="fa-solid fa-camera"></i>
+                </button>
+                <button onClick={handleCloudScreenshot} title="Subir Captura a Sheets" className={`px-3 py-1.5 rounded-r-md text-[10px] font-black border border-slate-700 transition-all flex items-center gap-2 ${lastSyncStatus === 'uploading' ? 'bg-yellow-600 text-white animate-pulse' : 'bg-slate-800 text-cyan-400 hover:text-white hover:border-cyan-400'}`}>
+                    {lastSyncStatus === 'uploading' ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-cloud-arrow-up"></i>} SUBIR
+                </button>
+            </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
