@@ -45,6 +45,7 @@ const App: React.FC = () => {
   const importFileRef = useRef<HTMLInputElement>(null);
   const lateImportRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const captureRef = useRef<HTMLDivElement>(null); // Ref specifically for screenshot
 
   const currentBoard = useMemo(() => {
     if (!activeBoardId || boards.length === 0) return null;
@@ -95,11 +96,22 @@ const App: React.FC = () => {
     setBoards(prev => prev.map(b => b.id === updatedBoard.id ? { ...updatedBoard } : b));
   }, []);
 
-  // --- CLOUD SYNC FUNCTION ---
-  const sendToCloud = (defectData: any) => {
+  // --- CLOUD SYNC FUNCTION (Updated for Split Date/Time) ---
+  const sendToCloud = (data: { boardName: string, side: string, component: string, defect: string, action: string }) => {
     if (!isSyncEnabled || !webhookUrl) return;
 
     setLastSyncStatus('idle');
+    
+    const now = new Date();
+    // Generate separate date and time strings
+    const dateStr = now.toLocaleDateString('es-ES');
+    const timeStr = now.toLocaleTimeString('es-ES');
+
+    const payload = {
+        date: dateStr,
+        time: timeStr,
+        ...data
+    };
     
     // We use no-cors to support Google Apps Script Webhooks simply
     fetch(webhookUrl, {
@@ -108,7 +120,7 @@ const App: React.FC = () => {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify(defectData)
+        body: JSON.stringify(payload)
     }).then(() => {
         setLastSyncStatus('success');
         setTimeout(() => setLastSyncStatus('idle'), 2000);
@@ -116,6 +128,44 @@ const App: React.FC = () => {
         console.error("Cloud Sync Error", err);
         setLastSyncStatus('error');
     });
+  };
+
+  // --- SCREENSHOT FUNCTIONALITY ---
+  const handleCaptureScreenshot = async () => {
+    if (!captureRef.current || !currentBoard) return;
+    
+    // Check if html2canvas is loaded globally via script tag
+    const html2canvas = (window as any).html2canvas;
+    if (!html2canvas) {
+        alert("Error: Librería de captura no cargada. Recargue la página.");
+        return;
+    }
+
+    try {
+        const wasHeatmapOn = showHeatmap;
+        // Optionally force heatmap on for capture if desired, or just capture what is seen.
+        // We will capture exactly what the user sees.
+
+        const canvas = await html2canvas(captureRef.current, {
+            useCORS: true, // Important for images
+            backgroundColor: null, // Transparent background if possible
+            scale: 2, // Higher quality
+            logging: false
+        });
+
+        const image = canvas.toDataURL("image/png");
+        
+        // Trigger Download
+        const link = document.createElement("a");
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        link.href = image;
+        link.download = `PCB_HEATMAP_${currentBoard.name}_${currentSide}_${timestamp}.png`;
+        link.click();
+
+    } catch (error) {
+        console.error("Screenshot failed:", error);
+        alert("Error al crear la captura. Intente nuevamente.");
+    }
   };
 
   const toggleSide = () => {
@@ -341,7 +391,6 @@ const App: React.FC = () => {
     const comp = currentBoard.components.find(c => c.id === compId);
     if(comp) {
         sendToCloud({
-            timestamp: new Date().toISOString(),
             boardName: currentBoard.name,
             side: currentSide,
             component: comp.name,
@@ -374,7 +423,6 @@ const App: React.FC = () => {
         if (!marker || marker.count <= 0) return;
         
         sendToCloud({
-            timestamp: new Date().toISOString(),
             boardName: currentBoard.name,
             side: currentSide,
             component: marker.type,
@@ -397,7 +445,6 @@ const App: React.FC = () => {
         if (!comp || comp.counts[key] <= 0) return;
 
         sendToCloud({
-            timestamp: new Date().toISOString(),
             boardName: currentBoard.name,
             side: currentSide,
             component: comp.name,
@@ -457,7 +504,6 @@ const App: React.FC = () => {
     };
     
     sendToCloud({
-        timestamp: new Date().toISOString(),
         boardName: currentBoard.name,
         side: currentSide,
         component: type,
@@ -477,7 +523,6 @@ const App: React.FC = () => {
     const marker = currentBoard.genericMarkers.find(m => m.id === id);
     if(marker) {
         sendToCloud({
-            timestamp: new Date().toISOString(),
             boardName: currentBoard.name,
             side: currentSide,
             component: marker.type,
@@ -701,6 +746,11 @@ const App: React.FC = () => {
             <button onClick={() => setShowHeatmap(!showHeatmap)} className={`px-3 py-1.5 rounded-md text-[10px] font-black border transition-all flex items-center gap-2 whitespace-nowrap ${showHeatmap ? 'bg-red-600 border-red-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
                 <i className={`fa-solid fa-fire ${showHeatmap ? 'text-white' : 'text-orange-500'}`}></i> CALOR
             </button>
+            
+            {/* New Screenshot Button */}
+            <button onClick={handleCaptureScreenshot} title="Capturar Heatmap" className="px-3 py-1.5 rounded-md text-[10px] font-black border border-slate-700 bg-slate-800 text-cyan-400 hover:text-white hover:border-cyan-400 transition-all flex items-center gap-2">
+                <i className="fa-solid fa-camera"></i> CAPTURA
+            </button>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -813,8 +863,9 @@ const App: React.FC = () => {
                   <input type="file" hidden ref={lateImportRef} accept="image/*" onChange={handleLateImageUpload} />
               </div>
             ) : (
-               // Wrapper for Pan/Zoom Transformation
+               // Wrapper for Pan/Zoom Transformation. Added Ref for Screenshot here (captureRef)
               <div 
+                ref={captureRef}
                 className="relative inline-block origin-center transition-transform duration-75 ease-out select-none"
                 style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})` }}
                 onClick={handleImageClick}
