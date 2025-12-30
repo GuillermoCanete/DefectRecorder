@@ -1,0 +1,7 @@
+{
+  "name": "PCB Defect Inspector Pro",
+  "description": "Industrial PCB quality control tool with AI-powered AOI, barcode scanning, and golden sample comparison.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
