@@ -127,7 +127,7 @@ const App: React.FC = () => {
     });
   };
 
-  // --- UPLOAD SCREENSHOT TO CLOUD ---
+  // --- UPLOAD SCREENSHOT TO CLOUD (OPTIMIZED FOR JPEG) ---
   const handleCloudScreenshot = async () => {
     if (!captureRef.current || !currentBoard) return;
     if (!webhookUrl) {
@@ -142,16 +142,17 @@ const App: React.FC = () => {
     try {
         setLastSyncStatus('uploading');
         
-        // 1. Capture Canvas
+        // 1. Capture Canvas (Optimized for Cloud Upload)
+        // Usamos escala 1 y fondo oscuro explícito para JPEG
         const canvas = await html2canvas(captureRef.current, {
             useCORS: true,
-            backgroundColor: null,
-            scale: 1.5, // Slightly lower scale than download to reduce payload size
+            backgroundColor: '#0f172a', // Fondo dark theme
+            scale: 1, // Escala estándar para evitar timeout en Google Script
             logging: false
         });
 
-        // 2. Convert to Base64 (remove prefix data:image/png;base64,)
-        const base64Image = canvas.toDataURL("image/png").split(',')[1];
+        // 2. Convertir a Base64 JPEG con Calidad 0.6 (Compresión alta)
+        const base64Image = canvas.toDataURL("image/jpeg", 0.6).split(',')[1];
         
         const now = new Date();
         const payload = {
@@ -172,17 +173,17 @@ const App: React.FC = () => {
         });
 
         setLastSyncStatus('success');
-        alert("Captura enviada a la hoja 'Capturas' en Google Sheets.");
+        alert("Captura enviada. Verifique la pestaña 'Capturas' en unos segundos.");
         setTimeout(() => setLastSyncStatus('idle'), 3000);
 
     } catch (error) {
         console.error("Upload failed:", error);
         setLastSyncStatus('error');
-        alert("Error al subir imagen. Es posible que sea demasiado grande.");
+        alert("Error al subir imagen. Verifique su conexión.");
     }
   };
 
-  // --- LOCAL DOWNLOAD SCREENSHOT ---
+  // --- LOCAL DOWNLOAD SCREENSHOT (HIGH QUALITY) ---
   const handleCaptureScreenshot = async () => {
     if (!captureRef.current || !currentBoard) return;
     
@@ -695,7 +696,7 @@ const App: React.FC = () => {
                 <i className="fa-solid fa-microchip text-white"></i>
             </div>
             <span className="font-black text-xl tracking-tighter uppercase whitespace-nowrap">PCB<span className="text-blue-500">PRO</span></span>
-            <span className="ml-1 text-[10px] text-slate-500 font-bold bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">V1.7</span>
+            <span className="ml-1 text-[10px] text-slate-500 font-bold bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">V1.11</span>
           </div>
           <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded-md border border-slate-700">
             <select 
