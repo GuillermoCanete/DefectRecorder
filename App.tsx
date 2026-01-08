@@ -142,17 +142,17 @@ const App: React.FC = () => {
     try {
         setLastSyncStatus('uploading');
         
-        // 1. Capture Canvas (Optimized for Cloud Upload)
-        // Usamos escala 1 y fondo oscuro explícito para JPEG
+        // 1. Capture Canvas (OPTIMIZED EXTREMELY FOR GOOGLE SHEETS)
+        // Reducimos escala a 0.6 para asegurar que el string Base64 pase por el Webhook
         const canvas = await html2canvas(captureRef.current, {
             useCORS: true,
             backgroundColor: '#0f172a', // Fondo dark theme
-            scale: 1, // Escala estándar para evitar timeout en Google Script
+            scale: 0.6, // ESCALA REDUCIDA para evitar errores de tamaño
             logging: false
         });
 
-        // 2. Convertir a Base64 JPEG con Calidad 0.6 (Compresión alta)
-        const base64Image = canvas.toDataURL("image/jpeg", 0.6).split(',')[1];
+        // 2. Convertir a Base64 JPEG con Calidad 0.5 (Compresión media)
+        const base64Image = canvas.toDataURL("image/jpeg", 0.5).split(',')[1];
         
         const now = new Date();
         const payload = {
@@ -173,13 +173,13 @@ const App: React.FC = () => {
         });
 
         setLastSyncStatus('success');
-        alert("Captura enviada. Verifique la pestaña 'Capturas' en unos segundos.");
+        alert("Captura enviada. Verifique la pestaña 'Capturas'.");
         setTimeout(() => setLastSyncStatus('idle'), 3000);
 
     } catch (error) {
         console.error("Upload failed:", error);
         setLastSyncStatus('error');
-        alert("Error al subir imagen. Verifique su conexión.");
+        alert("Error al subir imagen. Verifique su conexión o intente con una imagen de placa más pequeña.");
     }
   };
 
@@ -696,7 +696,7 @@ const App: React.FC = () => {
                 <i className="fa-solid fa-microchip text-white"></i>
             </div>
             <span className="font-black text-xl tracking-tighter uppercase whitespace-nowrap">PCB<span className="text-blue-500">PRO</span></span>
-            <span className="ml-1 text-[10px] text-slate-500 font-bold bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">V1.11</span>
+            <span className="ml-1 text-[10px] text-slate-500 font-bold bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">V1.12</span>
           </div>
           <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded-md border border-slate-700">
             <select 
@@ -868,6 +868,9 @@ const App: React.FC = () => {
                   const isActive = activeCompDetail === comp.id;
                   const heatColor = getHeatColor(total);
 
+                  // HIDE NON-DEFECTIVE COMPONENTS IN HEATMAP MODE
+                  if (showHeatmap && total === 0) return null;
+
                   // Flicker fix: Deterministic positioning based on X coordinate
                   // If component is on the right half (x > 50), show menu on left.
                   const detailSide = comp.x > 50 ? 'left' : 'right';
@@ -905,6 +908,10 @@ const App: React.FC = () => {
                 {currentBoard.genericMarkers.filter(m => m.side === currentSide).map(mark => {
                     const isSelected = selectedMarkerId === mark.id;
                     const heatColor = getHeatColor(mark.count);
+
+                    // HIDE NON-DEFECTIVE MARKERS IN HEATMAP MODE
+                    if (showHeatmap && mark.count === 0) return null;
+
                     return (
                         <div key={mark.id} style={{ left: `${mark.x}%`, top: `${mark.y}%`, transform: `translate(-50%, -50%) scale(${mark.scale || 1})` }} className={`absolute ${isSelected ? 'z-40' : 'z-20'}`} onClick={(e) => { e.stopPropagation(); if(isEditMode) setSelectedMarkerId(mark.id); else { incrementGeneric(mark.id, e); setContextMenu(null); setActiveCompDetail(null); } }}>
                           {showHeatmap && mark.count > 0 && <div className="absolute inset-0 -m-10 rounded-full blur-3xl opacity-70 animate-pulse" style={{ background: `radial-gradient(circle, ${heatColor} 0%, transparent 70%)` }} />}
